@@ -4,8 +4,12 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const connectDB = require("./config/db");
 const { initializeDefaultAdmin } = require("./controllers/adminController");
+const dns = require("dns");
 
 dotenv.config();
+
+// DNS fix
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 const app = express();
 
@@ -114,6 +118,7 @@ app.use('/api/cart', require('./routes/cartRoutes'));
 app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/bookings', require('./routes/bookingRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
+app.use('/api/astrology', require('./routes/astrologyRoutes'));
 
 /* ================================
    ROOT
