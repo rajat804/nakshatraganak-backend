@@ -27,8 +27,30 @@ router.post('/generate', protect, async (req, res) => {
   try {
     const { date, month, year, hour, minute, latitude, longitude, timezone = 5.5 } = req.body;
 
-    if (!date || !month || !year || !hour || !minute || !latitude || !longitude) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    console.log('📥 Received:', { date, month, year, hour, minute, latitude, longitude });
+
+    // ✅ Fix: Check for undefined/null, not falsy (0 is valid)
+    if (date === undefined || date === null || date === '') {
+      return res.status(400).json({ success: false, message: 'Date is required' });
+    }
+    if (month === undefined || month === null || month === '') {
+      return res.status(400).json({ success: false, message: 'Month is required' });
+    }
+    if (year === undefined || year === null || year === '') {
+      return res.status(400).json({ success: false, message: 'Year is required' });
+    }
+    if (hour === undefined || hour === null || hour === '') {
+      return res.status(400).json({ success: false, message: 'Hour is required' });
+    }
+    // ✅ Minute validation - 0 is valid, only reject if undefined/null/empty string
+    if (minute === undefined || minute === null || minute === '') {
+      return res.status(400).json({ success: false, message: 'Minute is required' });
+    }
+    if (latitude === undefined || latitude === null || latitude === '') {
+      return res.status(400).json({ success: false, message: 'Latitude is required' });
+    }
+    if (longitude === undefined || longitude === null || longitude === '') {
+      return res.status(400).json({ success: false, message: 'Longitude is required' });
     }
 
     const requestBody = {
@@ -36,11 +58,13 @@ router.post('/generate', protect, async (req, res) => {
       month: parseInt(month),
       year: parseInt(year),
       hour: parseInt(hour),
-      min: parseInt(minute),
+      min: parseInt(minute),  // ✅ minute allowed to be 0
       lat: parseFloat(latitude),
       lon: parseFloat(longitude),
       tzone: parseFloat(timezone)
     };
+
+    console.log('📤 Request Body:', requestBody);
 
     const authHeader = getAuthHeader();
 
@@ -51,13 +75,12 @@ router.post('/generate', protect, async (req, res) => {
       });
     }
 
-    // Correct Endpoints
     const [kundliResponse, panchangResponse] = await Promise.all([
-      axios.post(`${API_BASE}/astro_details`, requestBody, {   // Changed from /kundli
+      axios.post(`${API_BASE}/astro_details`, requestBody, {
         headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
         timeout: 25000
       }),
-      axios.post(`${API_BASE}/basic_panchang`, requestBody, {  // Changed from /panchang
+      axios.post(`${API_BASE}/basic_panchang`, requestBody, {
         headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
         timeout: 25000
       })
