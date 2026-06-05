@@ -119,6 +119,7 @@ app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/bookings', require('./routes/bookingRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/astrology', require('./routes/astrologyRoutes'));
+app.use('/api/kundlipayments',require('./routes/kundliPaymantRoutes'));
 
 /* ================================
    ROOT
