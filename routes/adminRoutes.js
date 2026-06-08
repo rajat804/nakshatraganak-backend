@@ -49,9 +49,9 @@ router.post('/reset-password', async (req, res) => {
 // Protected admin routes
 router.get('/me', protectAdmin, getCurrentAdmin);
 router.post('/create', protectAdmin, createAdmin);
-router.get('/users', protectAdmin, getAllUsers);
-router.put('/users/:id', protectAdmin, updateUserStatus);
-router.get('/stats', protectAdmin, getDashboardStats);
+router.get('/users', getAllUsers);
+router.put('/users/:id', updateUserStatus);
+router.get('/stats', getDashboardStats);
 
 
 module.exports = router;
