@@ -87,59 +87,220 @@ const createAdmin = async (req, res) => {
   }
 };
 
-// @desc    Get all users (admin only)
-// @route   GET /api/admin/users
-// @access  Private (Admin only)
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({}).select('-password');
-    res.json(users);
+    // Fetch all users with their bookings and savedCharts
+    const users = await User.find({})
+      .select('-password') // Exclude password field
+      .sort({ createdAt: -1 }); // Sort by newest first
+
+    if (!users || users.length === 0) {
+      return res.status(200).json({
+        success: true,
+        users: [],
+        total: 0,
+        message: 'No users found'
+      });
+    }
+
+    // Format user data
+    const formattedUsers = users.map(user => ({
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone || 'N/A',
+      isActive: user.isActive !== false,
+      role: user.role || 'user',
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      bookings: user.bookings || [],
+      savedCharts: user.savedCharts || [],
+      totalBookings: user.bookings ? user.bookings.length : 0,
+      totalSpent: user.bookings 
+        ? user.bookings
+            .filter(b => b.status === 'confirmed' || b.status === 'completed')
+            .reduce((sum, b) => sum + (b.servicePrice || 0), 0)
+        : 0
+    }));
+
+    res.status(200).json({
+      success: true,
+      users: formattedUsers,
+      total: formattedUsers.length,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({ msg: 'Server error' });
+    console.error('Error fetching users:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users',
+      error: error.message
+    });
   }
 };
 
-// @desc    Update user status (admin only)
+// @desc    Get single user by ID with bookings
+// @route   GET /api/admin/users/:id
+// @access  Private (Admin only)
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        isActive: user.isActive,
+        role: user.role,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        bookings: user.bookings || [],
+        savedCharts: user.savedCharts || []
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user'
+    });
+  }
+};
+
+// @desc    Update user status (Active/Block)
 // @route   PUT /api/admin/users/:id
 // @access  Private (Admin only)
 const updateUserStatus = async (req, res) => {
-  const { id } = req.params;
-  const { isActive } = req.body;
-
   try {
-    const user = await User.findById(id);
+    const { isActive } = req.body;
+    const userId = req.params.id;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { isActive: isActive },
+      { new: true }
+    ).select('-password');
+
     if (!user) {
-      return res.status(404).json({ msg: 'User not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
     }
 
-    user.isActive = isActive;
-    await user.save();
-
-    res.json({ msg: 'User status updated', user: { _id: user._id, isActive: user.isActive } });
+    res.status(200).json({
+      success: true,
+      message: `User ${isActive ? 'activated' : 'blocked'} successfully`,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        isActive: user.isActive
+      }
+    });
   } catch (error) {
-    console.error('Update user error:', error);
-    res.status(500).json({ msg: 'Server error' });
+    console.error('Error updating user status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update user status'
+    });
   }
 };
 
-// @desc    Get admin dashboard stats
+// @desc    Delete user
+// @route   DELETE /api/admin/users/:id
+// @access  Private (Admin only)
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully',
+      deletedUser: {
+        id: user._id,
+        email: user.email,
+        fullName: user.fullName
+      }
+    });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete user'
+    });
+  }
+};
+
+// @desc    Get dashboard statistics
 // @route   GET /api/admin/stats
 // @access  Private (Admin only)
 const getDashboardStats = async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const activeUsers = await User.countDocuments({ isActive: true });
-    const totalAdmins = await Admin.countDocuments();
-
-    res.json({
-      totalUsers,
-      activeUsers,
-      totalAdmins,
+    const blockedUsers = await User.countDocuments({ isActive: false });
+    
+    const allUsers = await User.find({});
+    
+    let totalBookings = 0;
+    let totalRevenue = 0;
+    let pendingBookings = 0;
+    let confirmedBookings = 0;
+    let completedBookings = 0;
+    
+    allUsers.forEach(user => {
+      if (user.bookings && user.bookings.length > 0) {
+        totalBookings += user.bookings.length;
+        
+        user.bookings.forEach(booking => {
+          if (booking.status === 'confirmed' || booking.status === 'completed') {
+            totalRevenue += booking.servicePrice || 0;
+          }
+          if (booking.status === 'pending') pendingBookings++;
+          if (booking.status === 'confirmed') confirmedBookings++;
+          if (booking.status === 'completed') completedBookings++;
+        });
+      }
+    });
+    
+    res.status(200).json({
+      success: true,
+      stats: {
+        totalUsers,
+        activeUsers,
+        blockedUsers,
+        totalBookings,
+        totalRevenue,
+        pendingBookings,
+        confirmedBookings,
+        completedBookings
+      }
     });
   } catch (error) {
-    console.error('Get stats error:', error);
-    res.status(500).json({ msg: 'Server error' });
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch statistics'
+    });
   }
 };
 
