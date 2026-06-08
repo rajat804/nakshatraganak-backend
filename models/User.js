@@ -17,16 +17,41 @@ const userSchema = new mongoose.Schema({
     kundliData: Object,
     panchangData: Object,
     createdAt: { type: Date, default: Date.now }
+  }],
+  bookings: [{
+    serviceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Service'
+    },
+    serviceName: String,
+    servicePrice: Number,
+    bookingDate: Date,
+    bookingTime: String,
+     name: { type: String, default: '' },   
+  email: { type: String, default: '' },     
+  phone: { type: String, default: '' },     
+    notes: String,
+    paymentId: String,
+    orderId: String,
+    status: {
+      type: String,
+      enum: ['pending', 'confirmed', 'completed', 'cancelled'],
+      default: 'pending'
+    },
+    bookedAt: {
+      type: Date,
+      default: Date.now
+    }
   }]
 }, { timestamps: true });
 
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
 
-userSchema.methods.comparePassword = async function(enteredPassword) {
+userSchema.methods.comparePassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
