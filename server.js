@@ -121,6 +121,8 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/astrology', require('./routes/astrologyRoutes'));
 app.use('/api/kundlipayments',require('./routes/kundliPaymantRoutes'));
 app.use('/api/blogs', require('./routes/blogRoutes'));
+app.use('/api/services', require('./routes/serviceRoutes'));
+app.use('/api/service-payment',require('./routes/servicePaymentRoutes'));
 
 
 /* ================================
