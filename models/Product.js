@@ -32,7 +32,16 @@ const productSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['Rudraksha', 'Mala', 'Rare', 'Necklace', '108 Mala', 'Bracelet'],
+      enum: [
+        'Rudraksha',
+        'Mala',
+        'Bracelet',
+        'Necklace',
+        'Gemstone',
+        'Spiritual Tools',
+        'Rare Items',
+        '108 Mala'
+      ],
       required: true,
     },
     gemstone: {
