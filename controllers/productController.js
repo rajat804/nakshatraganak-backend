@@ -158,29 +158,32 @@ const updateProduct = async (req, res) => {
     } = req.body;
     
     // Update fields
-    product.name = name || product.name;
-    product.price = price || product.price;
-    product.oldPrice = oldPrice !== undefined ? oldPrice : product.oldPrice;
-    product.image = image || product.image;
-    product.images = images || product.images;
-    product.type = type || product.type;
-    product.gemstone = gemstone || product.gemstone;
-    product.stock = stock !== undefined ? stock : product.stock;
-    product.sold = sold !== undefined ? sold : product.sold;
-    product.rating = rating !== undefined ? rating : product.rating;
-    product.inStock = (stock !== undefined ? stock : product.stock) > 0;
-    product.discount = discount !== undefined ? discount : product.discount;
-    product.subtitle = subtitle !== undefined ? subtitle : product.subtitle;
-    product.description = description !== undefined ? description : product.description;
-    product.designerNote = designerNote !== undefined ? designerNote : product.designerNote;
-    product.color = color !== undefined ? color : product.color;
-    product.material = material || product.material;
-    product.weight = weight !== undefined ? weight : product.weight;
-    product.dimensions = dimensions !== undefined ? dimensions : product.dimensions;
-    product.origin = origin || product.origin;
-    product.category = category || product.category;
-    product.isActive = isActive !== undefined ? isActive : product.isActive;
-    
+    product.name = name ?? product.name;
+product.price = price ?? product.price;
+product.oldPrice = oldPrice !== undefined ? oldPrice : product.oldPrice;
+product.image = image ?? product.image;
+product.images = images ?? product.images;
+product.type = type ?? product.type;
+product.gemstone = gemstone ?? product.gemstone;
+
+product.stock = stock ?? product.stock;
+product.sold = sold ?? product.sold;
+product.rating = rating ?? product.rating;
+
+product.inStock = (stock ?? product.stock) > 0;
+
+product.discount = discount ?? product.discount;
+product.subtitle = subtitle ?? product.subtitle;
+product.description = description ?? product.description;
+product.designerNote = designerNote ?? product.designerNote;
+product.color = color ?? product.color;
+product.material = material ?? product.material;
+product.weight = weight ?? product.weight;
+product.dimensions = dimensions ?? product.dimensions;
+product.origin = origin ?? product.origin;
+product.category = category ?? product.category;
+
+product.isActive = isActive ?? product.isActive;
     await product.save();
     
     res.json({
