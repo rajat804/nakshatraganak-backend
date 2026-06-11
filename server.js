@@ -18,9 +18,9 @@ const app = express();
 ================================ */
 const allowedOrigins = [
   "https://astarology-frontend.vercel.app",
+  "https://nakshatraganak.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "https://nakshatraganak.com",
 ];
 
 app.use(
