@@ -1,8 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
 const axios = require('axios');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
+const pdf = require('html-pdf');
 
 // ✅ Correct API Base URL
 const API_BASE = 'https://json.astrologyapi.com/v1';
@@ -315,10 +318,12 @@ router.post('/fix-old-charts', protect, async (req, res) => {
 });
 
 
-// ================== DOWNLOAD PDF (With Panchang) ==================
-router.post('/download-pdf', protect, async (req, res) => {
+// ================== DOWNLOAD PDF WITH PDFKIT ==================
+router.post('/download-pdf', async (req, res) => {
   try {
     const { kundliData, panchangData, userDetails } = req.body;
+    
+    console.log('📥 Generating PDF for:', userDetails?.name || 'User');
     
     const getValue = (obj, keys, defaultValue = 'N/A') => {
       if (!obj) return defaultValue;
@@ -331,14 +336,15 @@ router.post('/download-pdf', protect, async (req, res) => {
       return defaultValue;
     };
     
-    // ==================== KUNDLI DETAILS ====================
+    // Get all values
     const ascendant = getValue(kundliData, ['ascendant_sign', 'lagna', 'ascendant', 'sign'], 'N/A');
     const ascendantLord = getValue(kundliData, ['ascendant_lord', 'lagna_lord'], 'N/A');
     const rashi = getValue(kundliData, ['sign', 'rashi', 'moon_sign'], 'N/A');
-    const nakshatra = getValue(kundliData, ['nakshatra', 'Naksahtra'], 'N/A');
-    const nakshatraLord = getValue(kundliData, ['nakshatra_lord', 'NaksahtraLord'], 'N/A');
-    const nakshatraPada = getValue(kundliData, ['nakshatra_pada', 'pada', 'Charan'], 'N/A');
-    const manglik = getValue(kundliData, ['manglik', 'Manglik'], 'Non-Manglik');
+    const nakshatra = getValue(kundliData, ['nakshatra', 'Naksahtra', 'nakshstra', 'star'], 'N/A');
+    const nakshatraLord = getValue(kundliData, ['nakshatra_lord', 'lord'], 'N/A');
+    const nakshatraPada = getValue(kundliData, ['pada', 'Charan', 'charan'], 'N/A');
+    const manglik = getValue(kundliData, ['manglik', 'Manglik', 'is_manglik'], 'Non-Manglik');
+    const isManglik = (manglik === 'Yes' || manglik === 'Manglik');
     
     // Vedic Details
     const yoga = getValue(kundliData, ['yoga', 'yog', 'Yog'], 'N/A');
@@ -359,7 +365,7 @@ router.post('/download-pdf', protect, async (req, res) => {
     const antarDasha = getValue(kundliData, ['dasha.antar_dasha', 'current_dasha.antar_dasha'], 'N/A');
     const dashaEndDate = getValue(kundliData, ['dasha.end_date', 'current_dasha.end_date'], 'N/A');
     
-    // ==================== PANCHANG DETAILS ====================
+    // Panchang
     const sunrise = getValue(panchangData, ['sunrise', 'Sunrise'], 'N/A');
     const sunset = getValue(panchangData, ['sunset', 'Sunset'], 'N/A');
     const moonrise = getValue(panchangData, ['moonrise', 'Moonrise'], 'N/A');
@@ -375,268 +381,225 @@ router.post('/download-pdf', protect, async (req, res) => {
     const ritu = getValue(panchangData, ['ritu', 'Ritu'], 'N/A');
     const ayana = getValue(panchangData, ['ayana', 'Ayana'], 'N/A');
     
-    // ==================== PLANETS HTML ====================
-    let planetsHtml = '';
-    const planetEmojis = { sun: '☀️', moon: '🌙', mars: '♂️', mercury: '☿', jupiter: '♃', venus: '♀️', saturn: '♄', rahu: '☊', ketu: '☋' };
+    // Build Planets Table
+    let planetsRows = '';
+    const planets = kundliData.planets || {};
     const planetNames = { sun: 'Sun', moon: 'Moon', mars: 'Mars', mercury: 'Mercury', jupiter: 'Jupiter', venus: 'Venus', saturn: 'Saturn', rahu: 'Rahu', ketu: 'Ketu' };
     
-    if (kundliData.planets && Object.keys(kundliData.planets).length > 0) {
-      for (const [planet, info] of Object.entries(kundliData.planets)) {
-        planetsHtml += `
-          <div class="planet-item">
-            <strong>${planetEmojis[planet] || '🪐'} ${planetNames[planet]}</strong><br>
-            Sign: ${info.sign || 'N/A'}<br>
-            Degree: ${info.degree || 'N/A'}°<br>
-            House: ${info.house || 'N/A'}
-            ${info.retrograde ? '<br><span style="color:#ff4444;">⭕ Retrograde</span>' : ''}
-          </div>
-        `;
-      }
+    for (const [planet, info] of Object.entries(planets)) {
+      planetsRows += `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${planetNames[planet] || planet}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${info.sign || 'N/A'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${info.degree || 'N/A'}°</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${info.house || 'N/A'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${info.retrograde ? 'Yes' : 'No'}</td>
+        </tr>
+      `;
     }
     
-    // ==================== HOUSES HTML ====================
-    let housesHtml = '';
-    if (kundliData.houses && kundliData.houses.length > 0) {
-      for (let i = 0; i < Math.min(12, kundliData.houses.length); i++) {
-        const house = kundliData.houses[i];
-        housesHtml += `
-          <div class="house-item">
-            <strong>House ${i+1}</strong><br>
-            Sign: ${house.sign || 'N/A'}<br>
-            ${house.degree ? `Degree: ${house.degree}` : ''}
-            ${house.lord ? `<br>Lord: ${house.lord}` : ''}
-          </div>
-        `;
-      }
+    // Build Houses Table
+    let housesRows = '';
+    const houses = kundliData.houses || [];
+    const houseNames = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th'];
+    
+    for (let i = 0; i < Math.min(12, houses.length); i++) {
+      const house = houses[i];
+      housesRows += `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${houseNames[i]}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${house.sign || 'N/A'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${house.lord || 'N/A'}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${house.degree ? house.degree + '°' : 'N/A'}</td>
+        </tr>
+      `;
     }
     
-    // ==================== VEDIC DETAILS HTML ====================
-    const vedicDetailsHtml = `
-      <div class="grid-3">
-        <div class="info-card"><strong>🧘 Yoga:</strong><br>${yoga}</div>
-        <div class="info-card"><strong>📖 Tithi:</strong><br>${tithi}</div>
-        <div class="info-card"><strong>🌊 Karana:</strong><br>${karana}</div>
-        <div class="info-card"><strong>👨‍👩‍👧 Gan:</strong><br>${gan}</div>
-        <div class="info-card"><strong>💫 Nadi:</strong><br>${nadi}</div>
-        <div class="info-card"><strong>🎨 Varna:</strong><br>${varna}</div>
-        <div class="info-card"><strong>🤝 Vashya:</strong><br>${vashya}</div>
-        <div class="info-card"><strong>🐘 Yoni:</strong><br>${yoni}</div>
-        <div class="info-card"><strong>👑 Sign Lord:</strong><br>${signLord}</div>
-        <div class="info-card"><strong>🌍 Tatva:</strong><br>${tatva}</div>
-        <div class="info-card"><strong>💰 Paya:</strong><br>${paya}</div>
-        <div class="info-card"><strong>🔤 Name Alphabet:</strong><br>${nameAlphabet}</div>
+    // Complete HTML
+    const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Kundli Report - ${userDetails?.name || 'User'}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 40px;
+      background: white;
+      color: #333;
+      line-height: 1.4;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #5B4B8A;
+    }
+    .header h1 { color: #5B4B8A; font-size: 28px; margin-bottom: 8px; }
+    .header p { color: #666; font-size: 12px; }
+    .user-card {
+      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 25px;
+    }
+    .user-card h3 { margin-bottom: 10px; font-size: 18px; }
+    .user-card p { margin: 5px 0; opacity: 0.9; font-size: 12px; }
+    .section {
+      margin-bottom: 25px;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .section-title {
+      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
+      color: white;
+      padding: 10px 18px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .section-content { padding: 18px; background: #fafafa; }
+    .lagna-card {
+      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
+      color: white;
+      text-align: center;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 25px;
+    }
+    .lagna-value { font-size: 32px; font-weight: bold; margin: 8px 0; }
+    .manglik-yes { background: #E53935; color: white; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+    .manglik-no { background: #43A047; color: white; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .info-item { background: white; padding: 10px; border-radius: 8px; border-left: 3px solid #5B4B8A; }
+    .info-label { font-weight: bold; color: #5B4B8A; font-size: 11px; }
+    .info-value { font-size: 13px; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; background: white; }
+    th { background: #5B4B8A; color: white; padding: 10px; text-align: left; font-size: 12px; }
+    td { padding: 8px; border-bottom: 1px solid #eee; font-size: 11px; }
+    .dasha-card { background: #FFF8E1; padding: 12px; border-radius: 8px; margin-top: 10px; }
+    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 10px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>NAKSHATRA GANAK</h1>
+    <p>Complete Kundli Report</p>
+    <p>Generated on: ${new Date().toLocaleString()}</p>
+  </div>
+  
+  <div class="user-card">
+    <h3>👤 ${userDetails?.name || 'User'}</h3>
+    <p>📧 ${userDetails?.email || 'Not provided'}</p>
+    ${userDetails?.birthDetails ? `<p>📅 Birth: ${userDetails.birthDetails.date}/${userDetails.birthDetails.month}/${userDetails.birthDetails.year} at ${userDetails.birthDetails.hour}:${userDetails.birthDetails.minute}</p>` : ''}
+  </div>
+  
+  <div class="lagna-card">
+    <h3>LAGNA (ASCENDANT)</h3>
+    <div class="lagna-value">${ascendant}</div>
+    <div>Lord: ${ascendantLord}</div>
+  </div>
+  
+  <div class="section">
+    <div class="section-title">⭐ RASHI & NAKSHATRA DETAILS</div>
+    <div class="section-content">
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">Moon Sign (Rashi)</div><div class="info-value">${rashi}</div></div>
+        <div class="info-item"><div class="info-label">Birth Star (Nakshatra)</div><div class="info-value">${nakshatra}</div></div>
+        <div class="info-item"><div class="info-label">Nakshatra Lord</div><div class="info-value">${nakshatraLord}</div></div>
+        <div class="info-item"><div class="info-label">Pada / Charan</div><div class="info-value">${nakshatraPada}</div></div>
       </div>
-    `;
-    
-    // ==================== DASHA HTML ====================
-    const dashaHtml = mahaDasha !== 'N/A' ? `
-      <div class="section">
-        <div class="section-title">⏳ Current Vimshottari Dasha</div>
-        <div class="section-content">
-          <div class="dasha-card">
-            <div><strong>Maha Dasha:</strong> ${mahaDasha}</div>
-            <div><strong>Antar Dasha:</strong> ${antarDasha}</div>
-            <div><strong>Valid Until:</strong> ${dashaEndDate}</div>
-          </div>
-        </div>
+    </div>
+  </div>
+  
+  <div class="${isManglik ? 'manglik-yes' : 'manglik-no'}">
+    <strong>MANGLIK DOSHA:</strong> ${isManglik ? 'Manglik' : 'Non-Manglik'}
+  </div>
+  
+  <div class="section">
+    <div class="section-title">📖 VEDIC ASTROLOGICAL DETAILS</div>
+    <div class="section-content">
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">Yoga</div><div class="info-value">${yoga}</div></div>
+        <div class="info-item"><div class="info-label">Tithi</div><div class="info-value">${tithi}</div></div>
+        <div class="info-item"><div class="info-label">Karana</div><div class="info-value">${karana}</div></div>
+        <div class="info-item"><div class="info-label">Gan</div><div class="info-value">${gan}</div></div>
+        <div class="info-item"><div class="info-label">Nadi</div><div class="info-value">${nadi}</div></div>
+        <div class="info-item"><div class="info-label">Varna</div><div class="info-value">${varna}</div></div>
+        <div class="info-item"><div class="info-label">Vashya</div><div class="info-value">${vashya}</div></div>
+        <div class="info-item"><div class="info-label">Yoni</div><div class="info-value">${yoni}</div></div>
+        <div class="info-item"><div class="info-label">Sign Lord</div><div class="info-value">${signLord}</div></div>
+        <div class="info-item"><div class="info-label">Tatva</div><div class="info-value">${tatva}</div></div>
+        <div class="info-item"><div class="info-label">Paya</div><div class="info-value">${paya}</div></div>
+        <div class="info-item"><div class="info-label">Name Alphabet</div><div class="info-value">${nameAlphabet}</div></div>
       </div>
-    ` : '';
-    
-    // ==================== PANCHANG HTML ====================
-    const panchangHtml = `
-      <div class="section">
-        <div class="section-title">📅 Daily Panchang</div>
-        <div class="section-content">
-          <div class="sun-times">
-            <div class="sun-card">🌅 Sunrise: ${sunrise}</div>
-            <div class="sun-card">🌇 Sunset: ${sunset}</div>
-            <div class="sun-card">🌙 Moonrise: ${moonrise}</div>
-            <div class="sun-card">🌚 Moonset: ${moonset}</div>
-          </div>
-          <div class="panchang-grid">
-            <div class="panchang-card"><strong>📖 Tithi:</strong><br>${panchangTithi}</div>
-            <div class="panchang-card"><strong>⭐ Nakshatra:</strong><br>${panchangNakshatra}</div>
-            <div class="panchang-card"><strong>🧘 Yoga:</strong><br>${panchangYoga}</div>
-            <div class="panchang-card"><strong>🌊 Karana:</strong><br>${panchangKarana}</div>
-          </div>
-          <div class="muhurat-grid">
-            <div class="muhurat-card">🔴 Rahu Kaal: ${rahuKaal}</div>
-            <div class="muhurat-card">🟡 Yamaganda: ${yamaganda}</div>
-            <div class="muhurat-card">🟢 Gulika: ${gulika}</div>
-            <div class="muhurat-card">📅 Paksha: ${paksha}</div>
-            <div class="muhurat-card">🌸 Ritu: ${ritu}</div>
-            <div class="muhurat-card">☀️ Ayana: ${ayana}</div>
-          </div>
-        </div>
+    </div>
+  </div>
+  
+  <div class="section">
+    <div class="section-title">🪐 PLANETARY POSITIONS</div>
+    <div class="section-content">
+      <table>
+        <thead><tr><th>Planet</th><th>Sign</th><th>Degree</th><th>House</th><th>Retrograde</th></tr></thead>
+        <tbody>${planetsRows || '<tr><td colspan="5" style="text-align:center;">No data available</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+  
+  <div class="section">
+    <div class="section-title">🏠 HOUSES (BHAVAS)</div>
+    <div class="section-content">
+      <table>
+        <thead><tr><th>House</th><th>Sign</th><th>Lord</th><th>Degree</th></tr></thead>
+        <tbody>${housesRows || '<tr><td colspan="4" style="text-align:center;">No data available</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+  
+  ${mahaDasha !== 'N/A' ? `
+  <div class="section">
+    <div class="section-title">⏳ CURRENT VIMSHOTTARI DASHA</div>
+    <div class="section-content">
+      <div class="dasha-card">
+        <strong>Maha Dasha:</strong> ${mahaDasha}<br>
+        <strong>Antar Dasha:</strong> ${antarDasha}<br>
+        <strong>Valid Until:</strong> ${dashaEndDate}
       </div>
-    `;
+    </div>
+  </div>
+  ` : ''}
+  
+  <div class="section">
+    <div class="section-title">📅 DAILY PANCHANG</div>
+    <div class="section-content">
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">Sunrise</div><div class="info-value">${sunrise}</div></div>
+        <div class="info-item"><div class="info-label">Sunset</div><div class="info-value">${sunset}</div></div>
+        <div class="info-item"><div class="info-label">Moonrise</div><div class="info-value">${moonrise}</div></div>
+        <div class="info-item"><div class="info-label">Moonset</div><div class="info-value">${moonset}</div></div>
+        <div class="info-item"><div class="info-label">Tithi</div><div class="info-value">${panchangTithi}</div></div>
+        <div class="info-item"><div class="info-label">Nakshatra</div><div class="info-value">${panchangNakshatra}</div></div>
+        <div class="info-item"><div class="info-label">Yoga</div><div class="info-value">${panchangYoga}</div></div>
+        <div class="info-item"><div class="info-label">Karana</div><div class="info-value">${panchangKarana}</div></div>
+        <div class="info-item"><div class="info-label">Rahu Kaal</div><div class="info-value">${rahuKaal}</div></div>
+        <div class="info-item"><div class="info-label">Yamaganda</div><div class="info-value">${yamaganda}</div></div>
+        <div class="info-item"><div class="info-label">Gulika</div><div class="info-value">${gulika}</div></div>
+        <div class="info-item"><div class="info-label">Paksha</div><div class="info-value">${paksha}</div></div>
+        <div class="info-item"><div class="info-label">Ritu</div><div class="info-value">${ritu}</div></div>
+        <div class="info-item"><div class="info-label">Ayana</div><div class="info-value">${ayana}</div></div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="footer">
+    <p>This is a computer-generated kundli report based on Vedic astrology calculations.</p>
+    <p>© ${new Date().getFullYear()} Nakshatra Ganak - All Rights Reserved</p>
+  </div>
+</body>
+</html>`;
     
-    // ==================== COMPLETE HTML ====================
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Kundli Report - ${userDetails?.name || 'User'}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            padding: 40px;
-            background: white;
-            color: #333;
-            line-height: 1.5;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 3px solid #667eea;
-          }
-          .header h1 { color: #667eea; font-size: 28px; margin-bottom: 10px; }
-          .header p { color: #666; font-size: 14px; }
-          .user-info {
-            background: #f0f0ff;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            text-align: center;
-          }
-          .user-info h3 { color: #667eea; margin-bottom: 8px; }
-          .section {
-            margin-bottom: 25px;
-            border: 1px solid #e0e0e0;
-            border-radius: 12px;
-            overflow: hidden;
-          }
-          .section-title {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            padding: 12px 20px;
-            font-size: 18px;
-            font-weight: bold;
-          }
-          .section-content { padding: 20px; }
-          .ascendant-card {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            text-align: center;
-            padding: 25px;
-            border-radius: 12px;
-            margin-bottom: 25px;
-          }
-          .ascendant-value { font-size: 36px; font-weight: bold; margin: 10px 0; }
-          .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
-          .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
-          .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-          .info-card {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-          }
-          .planet-item, .house-item {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 10px;
-            text-align: center;
-          }
-          .sun-times { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-          .sun-card { background: #ffd700; padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; }
-          .panchang-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-          .panchang-card { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 10px; text-align: center; }
-          .muhurat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
-          .muhurat-card { background: #f8f9fa; padding: 12px; border-radius: 10px; text-align: center; border: 1px solid #ddd; }
-          .manglik-yes { background: #ff4444; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-          .manglik-no { background: #4caf50; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-          .dasha-card { background: #fff3cd; padding: 15px; border-radius: 10px; }
-          .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 11px; color: #999; }
-          @media print { body { padding: 20px; } .section { break-inside: avoid; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>🔮 Nakshatra Ganak - Kundli Report</h1>
-          <p>Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-        </div>
-        
-        <div class="user-info">
-          <h3>📋 Report For: ${userDetails?.name || 'User'}</h3>
-          <p>📧 ${userDetails?.email || 'Not provided'}</p>
-          <p>📅 Birth Details: ${userDetails?.birthDetails?.date}/${userDetails?.birthDetails?.month}/${userDetails?.birthDetails?.year} at ${userDetails?.birthDetails?.hour}:${userDetails?.birthDetails?.minute}</p>
-        </div>
-        
-        <!-- Lagna -->
-        <div class="ascendant-card">
-          <h3>🌅 Lagna (Ascendant)</h3>
-          <div class="ascendant-value">${ascendant}</div>
-          <div>Lord: ${ascendantLord}</div>
-        </div>
-        
-        <!-- Rashi & Nakshatra -->
-        <div class="section">
-          <div class="section-title">⭐ Rashi & Nakshatra Details</div>
-          <div class="section-content">
-            <div class="grid-2">
-              <div class="info-card"><strong>⭐ Rashi (Moon Sign):</strong><br>${rashi}</div>
-              <div class="info-card"><strong>⭐ Nakshatra:</strong><br>${nakshatra}</div>
-              <div class="info-card"><strong>👑 Nakshatra Lord:</strong><br>${nakshatraLord}</div>
-              <div class="info-card"><strong>📌 Pada/Charan:</strong><br>${nakshatraPada}</div>
-            </div>
-          </div>
-        </div>
-        
-        <!-- Manglik -->
-        <div class="${manglik === 'Yes' || manglik === 'Manglik' ? 'manglik-yes' : 'manglik-no'}">
-          <h3>🔴 Manglik Dosha</h3>
-          <div style="font-size: 24px; font-weight: bold;">${manglik === 'Yes' || manglik === 'Manglik' ? 'Manglik' : 'Non-Manglik'}</div>
-        </div>
-        
-        <!-- Vedic Details -->
-        <div class="section">
-          <div class="section-title">📖 Vedic Astrological Details</div>
-          <div class="section-content">
-            <div class="grid-3">
-              ${vedicDetailsHtml}
-            </div>
-          </div>
-        </div>
-        
-        <!-- Planets -->
-        <div class="section">
-          <div class="section-title">🪐 Planetary Positions (Grahas)</div>
-          <div class="section-content">
-            <div class="grid-3">
-              ${planetsHtml}
-            </div>
-          </div>
-        </div>
-        
-        <!-- Houses -->
-        <div class="section">
-          <div class="section-title">🏠 Houses (Bhavas)</div>
-          <div class="section-content">
-            <div class="grid-4">
-              ${housesHtml}
-            </div>
-          </div>
-        </div>
-        
-        ${dashaHtml}
-        
-        <!-- Panchang -->
-        ${panchangHtml}
-        
-        <div class="footer">
-          <p>This is a computer-generated kundli report based on Vedic astrology calculations.</p>
-          <p>© ${new Date().getFullYear()} Nakshatra Ganak - All Rights Reserved</p>
-          <p>For accurate predictions and remedies, consult an expert astrologer.</p>
-        </div>
-      </body>
-      </html>
-    `;
-    
-    const pdf = require('html-pdf');
     const options = { 
       format: 'A4',
       orientation: 'portrait',
@@ -648,17 +611,363 @@ router.post('/download-pdf', protect, async (req, res) => {
     pdf.create(htmlContent, options).toBuffer((err, buffer) => {
       if (err) {
         console.error('PDF error:', err);
-        return res.status(500).json({ success: false, message: 'PDF generation failed' });
+        return res.status(500).json({ success: false, message: 'PDF generation failed: ' + err.message });
       }
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'attachment; filename=kundli_report.pdf');
       res.send(buffer);
     });
+    
   } catch (err) {
     console.error('Download error:', err);
-    res.status(500).json({ success: false, message: 'Failed to generate PDF' });
+    res.status(500).json({ success: false, message: 'Failed to generate PDF: ' + err.message });
   }
 });
+// ================== DOWNLOAD PDF (With Panchang) ==================
+// router.post('/download-pdf', async (req, res) => {
+//   try {
+//     const { kundliData, panchangData, userDetails } = req.body;
+    
+//     const getValue = (obj, keys, defaultValue = 'N/A') => {
+//       if (!obj) return defaultValue;
+//       const keyArray = Array.isArray(keys) ? keys : [keys];
+//       for (const key of keyArray) {
+//         if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+//           return obj[key];
+//         }
+//       }
+//       return defaultValue;
+//     };
+    
+//     // ==================== KUNDLI DETAILS ====================
+//     const ascendant = getValue(kundliData, ['ascendant_sign', 'lagna', 'ascendant', 'sign'], 'N/A');
+//     const ascendantLord = getValue(kundliData, ['ascendant_lord', 'lagna_lord'], 'N/A');
+//     const rashi = getValue(kundliData, ['sign', 'rashi', 'moon_sign'], 'N/A');
+//     const nakshatra = getValue(kundliData, ['nakshatra', 'Naksahtra'], 'N/A');
+//     const nakshatraLord = getValue(kundliData, ['nakshatra_lord', 'NaksahtraLord'], 'N/A');
+//     const nakshatraPada = getValue(kundliData, ['nakshatra_pada', 'pada', 'Charan'], 'N/A');
+//     const manglik = getValue(kundliData, ['manglik', 'Manglik'], 'Non-Manglik');
+    
+//     // Vedic Details
+//     const yoga = getValue(kundliData, ['yoga', 'yog', 'Yog'], 'N/A');
+//     const tithi = getValue(kundliData, ['tithi', 'Tithi'], 'N/A');
+//     const karana = getValue(kundliData, ['karana', 'Karan'], 'N/A');
+//     const gan = getValue(kundliData, ['gan', 'Gan'], 'N/A');
+//     const nadi = getValue(kundliData, ['nadi', 'Nadi'], 'N/A');
+//     const varna = getValue(kundliData, ['varna', 'Varna'], 'N/A');
+//     const vashya = getValue(kundliData, ['vashya', 'Vashya'], 'N/A');
+//     const yoni = getValue(kundliData, ['yoni', 'Yoni'], 'N/A');
+//     const signLord = getValue(kundliData, ['sign_lord', 'SignLord'], 'N/A');
+//     const tatva = getValue(kundliData, ['tatva', 'element'], 'N/A');
+//     const paya = getValue(kundliData, ['paya'], 'N/A');
+//     const nameAlphabet = getValue(kundliData, ['name_alphabet'], 'N/A');
+    
+//     // Dasha
+//     const mahaDasha = getValue(kundliData, ['dasha.maha_dasha', 'current_dasha.maha_dasha'], 'N/A');
+//     const antarDasha = getValue(kundliData, ['dasha.antar_dasha', 'current_dasha.antar_dasha'], 'N/A');
+//     const dashaEndDate = getValue(kundliData, ['dasha.end_date', 'current_dasha.end_date'], 'N/A');
+    
+//     // ==================== PANCHANG DETAILS ====================
+//     const sunrise = getValue(panchangData, ['sunrise', 'Sunrise'], 'N/A');
+//     const sunset = getValue(panchangData, ['sunset', 'Sunset'], 'N/A');
+//     const moonrise = getValue(panchangData, ['moonrise', 'Moonrise'], 'N/A');
+//     const moonset = getValue(panchangData, ['moonset', 'Moonset'], 'N/A');
+//     const panchangTithi = getValue(panchangData, ['tithi', 'Tithi'], 'N/A');
+//     const panchangNakshatra = getValue(panchangData, ['nakshatra', 'Naksahtra'], 'N/A');
+//     const panchangYoga = getValue(panchangData, ['yog', 'yoga', 'Yog'], 'N/A');
+//     const panchangKarana = getValue(panchangData, ['karan', 'Karan'], 'N/A');
+//     const rahuKaal = getValue(panchangData, ['rahukaal', 'Rahukaal', 'rahukal'], 'N/A');
+//     const yamaganda = getValue(panchangData, ['yamaganda', 'Yamaganda'], 'N/A');
+//     const gulika = getValue(panchangData, ['gulika', 'Gulika'], 'N/A');
+//     const paksha = getValue(panchangData, ['paksha', 'Paksha'], 'N/A');
+//     const ritu = getValue(panchangData, ['ritu', 'Ritu'], 'N/A');
+//     const ayana = getValue(panchangData, ['ayana', 'Ayana'], 'N/A');
+    
+//     // ==================== PLANETS HTML ====================
+//     let planetsHtml = '';
+//     const planetEmojis = { sun: '☀️', moon: '🌙', mars: '♂️', mercury: '☿', jupiter: '♃', venus: '♀️', saturn: '♄', rahu: '☊', ketu: '☋' };
+//     const planetNames = { sun: 'Sun', moon: 'Moon', mars: 'Mars', mercury: 'Mercury', jupiter: 'Jupiter', venus: 'Venus', saturn: 'Saturn', rahu: 'Rahu', ketu: 'Ketu' };
+    
+//     if (kundliData.planets && Object.keys(kundliData.planets).length > 0) {
+//       for (const [planet, info] of Object.entries(kundliData.planets)) {
+//         planetsHtml += `
+//           <div class="planet-item">
+//             <strong>${planetEmojis[planet] || '🪐'} ${planetNames[planet]}</strong><br>
+//             Sign: ${info.sign || 'N/A'}<br>
+//             Degree: ${info.degree || 'N/A'}°<br>
+//             House: ${info.house || 'N/A'}
+//             ${info.retrograde ? '<br><span style="color:#ff4444;">⭕ Retrograde</span>' : ''}
+//           </div>
+//         `;
+//       }
+//     }
+    
+//     // ==================== HOUSES HTML ====================
+//     let housesHtml = '';
+//     if (kundliData.houses && kundliData.houses.length > 0) {
+//       for (let i = 0; i < Math.min(12, kundliData.houses.length); i++) {
+//         const house = kundliData.houses[i];
+//         housesHtml += `
+//           <div class="house-item">
+//             <strong>House ${i+1}</strong><br>
+//             Sign: ${house.sign || 'N/A'}<br>
+//             ${house.degree ? `Degree: ${house.degree}` : ''}
+//             ${house.lord ? `<br>Lord: ${house.lord}` : ''}
+//           </div>
+//         `;
+//       }
+//     }
+    
+//     // ==================== VEDIC DETAILS HTML ====================
+//     const vedicDetailsHtml = `
+//       <div class="grid-3">
+//         <div class="info-card"><strong>🧘 Yoga:</strong><br>${yoga}</div>
+//         <div class="info-card"><strong>📖 Tithi:</strong><br>${tithi}</div>
+//         <div class="info-card"><strong>🌊 Karana:</strong><br>${karana}</div>
+//         <div class="info-card"><strong>👨‍👩‍👧 Gan:</strong><br>${gan}</div>
+//         <div class="info-card"><strong>💫 Nadi:</strong><br>${nadi}</div>
+//         <div class="info-card"><strong>🎨 Varna:</strong><br>${varna}</div>
+//         <div class="info-card"><strong>🤝 Vashya:</strong><br>${vashya}</div>
+//         <div class="info-card"><strong>🐘 Yoni:</strong><br>${yoni}</div>
+//         <div class="info-card"><strong>👑 Sign Lord:</strong><br>${signLord}</div>
+//         <div class="info-card"><strong>🌍 Tatva:</strong><br>${tatva}</div>
+//         <div class="info-card"><strong>💰 Paya:</strong><br>${paya}</div>
+//         <div class="info-card"><strong>🔤 Name Alphabet:</strong><br>${nameAlphabet}</div>
+//       </div>
+//     `;
+    
+//     // ==================== DASHA HTML ====================
+//     const dashaHtml = mahaDasha !== 'N/A' ? `
+//       <div class="section">
+//         <div class="section-title">⏳ Current Vimshottari Dasha</div>
+//         <div class="section-content">
+//           <div class="dasha-card">
+//             <div><strong>Maha Dasha:</strong> ${mahaDasha}</div>
+//             <div><strong>Antar Dasha:</strong> ${antarDasha}</div>
+//             <div><strong>Valid Until:</strong> ${dashaEndDate}</div>
+//           </div>
+//         </div>
+//       </div>
+//     ` : '';
+    
+//     // ==================== PANCHANG HTML ====================
+//     const panchangHtml = `
+//       <div class="section">
+//         <div class="section-title">📅 Daily Panchang</div>
+//         <div class="section-content">
+//           <div class="sun-times">
+//             <div class="sun-card">🌅 Sunrise: ${sunrise}</div>
+//             <div class="sun-card">🌇 Sunset: ${sunset}</div>
+//             <div class="sun-card">🌙 Moonrise: ${moonrise}</div>
+//             <div class="sun-card">🌚 Moonset: ${moonset}</div>
+//           </div>
+//           <div class="panchang-grid">
+//             <div class="panchang-card"><strong>📖 Tithi:</strong><br>${panchangTithi}</div>
+//             <div class="panchang-card"><strong>⭐ Nakshatra:</strong><br>${panchangNakshatra}</div>
+//             <div class="panchang-card"><strong>🧘 Yoga:</strong><br>${panchangYoga}</div>
+//             <div class="panchang-card"><strong>🌊 Karana:</strong><br>${panchangKarana}</div>
+//           </div>
+//           <div class="muhurat-grid">
+//             <div class="muhurat-card">🔴 Rahu Kaal: ${rahuKaal}</div>
+//             <div class="muhurat-card">🟡 Yamaganda: ${yamaganda}</div>
+//             <div class="muhurat-card">🟢 Gulika: ${gulika}</div>
+//             <div class="muhurat-card">📅 Paksha: ${paksha}</div>
+//             <div class="muhurat-card">🌸 Ritu: ${ritu}</div>
+//             <div class="muhurat-card">☀️ Ayana: ${ayana}</div>
+//           </div>
+//         </div>
+//       </div>
+//     `;
+    
+//     // ==================== COMPLETE HTML ====================
+//     const htmlContent = `
+//       <!DOCTYPE html>
+//       <html>
+//       <head>
+//         <meta charset="UTF-8">
+//         <title>Kundli Report - ${userDetails?.name || 'User'}</title>
+//         <style>
+//           * { margin: 0; padding: 0; box-sizing: border-box; }
+//           body {
+//             font-family: 'Segoe UI', Arial, sans-serif;
+//             padding: 40px;
+//             background: white;
+//             color: #333;
+//             line-height: 1.5;
+//           }
+//           .header {
+//             text-align: center;
+//             margin-bottom: 30px;
+//             padding-bottom: 20px;
+//             border-bottom: 3px solid #667eea;
+//           }
+//           .header h1 { color: #667eea; font-size: 28px; margin-bottom: 10px; }
+//           .header p { color: #666; font-size: 14px; }
+//           .user-info {
+//             background: #f0f0ff;
+//             padding: 15px;
+//             border-radius: 10px;
+//             margin-bottom: 25px;
+//             text-align: center;
+//           }
+//           .user-info h3 { color: #667eea; margin-bottom: 8px; }
+//           .section {
+//             margin-bottom: 25px;
+//             border: 1px solid #e0e0e0;
+//             border-radius: 12px;
+//             overflow: hidden;
+//           }
+//           .section-title {
+//             background: linear-gradient(135deg, #667eea, #764ba2);
+//             color: white;
+//             padding: 12px 20px;
+//             font-size: 18px;
+//             font-weight: bold;
+//           }
+//           .section-content { padding: 20px; }
+//           .ascendant-card {
+//             background: linear-gradient(135deg, #667eea, #764ba2);
+//             color: white;
+//             text-align: center;
+//             padding: 25px;
+//             border-radius: 12px;
+//             margin-bottom: 25px;
+//           }
+//           .ascendant-value { font-size: 36px; font-weight: bold; margin: 10px 0; }
+//           .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
+//           .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+//           .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+//           .info-card {
+//             background: #f8f9fa;
+//             padding: 12px;
+//             border-radius: 10px;
+//             border-left: 4px solid #667eea;
+//           }
+//           .planet-item, .house-item {
+//             background: #f8f9fa;
+//             padding: 12px;
+//             border-radius: 10px;
+//             text-align: center;
+//           }
+//           .sun-times { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+//           .sun-card { background: #ffd700; padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; }
+//           .panchang-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+//           .panchang-card { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 10px; text-align: center; }
+//           .muhurat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
+//           .muhurat-card { background: #f8f9fa; padding: 12px; border-radius: 10px; text-align: center; border: 1px solid #ddd; }
+//           .manglik-yes { background: #ff4444; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+//           .manglik-no { background: #4caf50; color: white; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+//           .dasha-card { background: #fff3cd; padding: 15px; border-radius: 10px; }
+//           .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 11px; color: #999; }
+//           @media print { body { padding: 20px; } .section { break-inside: avoid; } }
+//         </style>
+//       </head>
+//       <body>
+//         <div class="header">
+//           <h1>🔮 Nakshatra Ganak - Kundli Report</h1>
+//           <p>Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+//         </div>
+        
+//         <div class="user-info">
+//           <h3>📋 Report For: ${userDetails?.name || 'User'}</h3>
+//           <p>📧 ${userDetails?.email || 'Not provided'}</p>
+//           <p>📅 Birth Details: ${userDetails?.birthDetails?.date}/${userDetails?.birthDetails?.month}/${userDetails?.birthDetails?.year} at ${userDetails?.birthDetails?.hour}:${userDetails?.birthDetails?.minute}</p>
+//         </div>
+        
+//         <!-- Lagna -->
+//         <div class="ascendant-card">
+//           <h3>🌅 Lagna (Ascendant)</h3>
+//           <div class="ascendant-value">${ascendant}</div>
+//           <div>Lord: ${ascendantLord}</div>
+//         </div>
+        
+//         <!-- Rashi & Nakshatra -->
+//         <div class="section">
+//           <div class="section-title">⭐ Rashi & Nakshatra Details</div>
+//           <div class="section-content">
+//             <div class="grid-2">
+//               <div class="info-card"><strong>⭐ Rashi (Moon Sign):</strong><br>${rashi}</div>
+//               <div class="info-card"><strong>⭐ Nakshatra:</strong><br>${nakshatra}</div>
+//               <div class="info-card"><strong>👑 Nakshatra Lord:</strong><br>${nakshatraLord}</div>
+//               <div class="info-card"><strong>📌 Pada/Charan:</strong><br>${nakshatraPada}</div>
+//             </div>
+//           </div>
+//         </div>
+        
+//         <!-- Manglik -->
+//         <div class="${manglik === 'Yes' || manglik === 'Manglik' ? 'manglik-yes' : 'manglik-no'}">
+//           <h3>🔴 Manglik Dosha</h3>
+//           <div style="font-size: 24px; font-weight: bold;">${manglik === 'Yes' || manglik === 'Manglik' ? 'Manglik' : 'Non-Manglik'}</div>
+//         </div>
+        
+//         <!-- Vedic Details -->
+//         <div class="section">
+//           <div class="section-title">📖 Vedic Astrological Details</div>
+//           <div class="section-content">
+//             <div class="grid-3">
+//               ${vedicDetailsHtml}
+//             </div>
+//           </div>
+//         </div>
+        
+//         <!-- Planets -->
+//         <div class="section">
+//           <div class="section-title">🪐 Planetary Positions (Grahas)</div>
+//           <div class="section-content">
+//             <div class="grid-3">
+//               ${planetsHtml}
+//             </div>
+//           </div>
+//         </div>
+        
+//         <!-- Houses -->
+//         <div class="section">
+//           <div class="section-title">🏠 Houses (Bhavas)</div>
+//           <div class="section-content">
+//             <div class="grid-4">
+//               ${housesHtml}
+//             </div>
+//           </div>
+//         </div>
+        
+//         ${dashaHtml}
+        
+//         <!-- Panchang -->
+//         ${panchangHtml}
+        
+//         <div class="footer">
+//           <p>This is a computer-generated kundli report based on Vedic astrology calculations.</p>
+//           <p>© ${new Date().getFullYear()} Nakshatra Ganak - All Rights Reserved</p>
+//           <p>For accurate predictions and remedies, consult an expert astrologer.</p>
+//         </div>
+//       </body>
+//       </html>
+//     `;
+    
+//     const pdf = require('html-pdf');
+//     const options = { 
+//       format: 'A4',
+//       orientation: 'portrait',
+//       border: '10mm',
+//       type: 'pdf',
+//       timeout: 30000
+//     };
+    
+//     pdf.create(htmlContent, options).toBuffer((err, buffer) => {
+//       if (err) {
+//         console.error('PDF error:', err);
+//         return res.status(500).json({ success: false, message: 'PDF generation failed' });
+//       }
+//       res.setHeader('Content-Type', 'application/pdf');
+//       res.setHeader('Content-Disposition', 'attachment; filename=kundli_report.pdf');
+//       res.send(buffer);
+//     });
+//   } catch (err) {
+//     console.error('Download error:', err);
+//     res.status(500).json({ success: false, message: 'Failed to generate PDF' });
+//   }
+// });
+
 
 // ================== SAVE PURCHASED KUNDLI ==================
 router.post('/save-purchased-kundli', protect, async (req, res) => {
