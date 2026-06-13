@@ -325,6 +325,7 @@ router.post('/download-pdf', async (req, res) => {
     
     console.log('📥 Generating PDF for:', userDetails?.name || 'User');
     
+    
     const getValue = (obj, keys, defaultValue = 'N/A') => {
       if (!obj) return defaultValue;
       const keyArray = Array.isArray(keys) ? keys : [keys];
