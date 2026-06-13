@@ -21,7 +21,7 @@ router.post('/create-order', protect, async (req, res) => {
     const PRODUCTION_AMOUNT = 99; // ₹99 for production
     
     // Use 1 rupee for testing
-    const amount = PRODUCTION_AMOUNT;
+    const amount = TESTING_AMOUNT;
     const { currency = 'INR' } = req.body;
     
     const options = {
