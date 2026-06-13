@@ -5,7 +5,6 @@ const fs = require('fs');
 const axios = require('axios');
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
-const pdf = require('html-pdf');
 
 // ✅ Correct API Base URL
 const API_BASE = 'https://json.astrologyapi.com/v1';
@@ -319,312 +318,406 @@ router.post('/fix-old-charts', protect, async (req, res) => {
 
 
 // ================== DOWNLOAD PDF WITH PDFKIT ==================
+
+// Helper function
+const getValue = (obj, keys, defaultValue = 'N/A') => {
+  if (!obj) return defaultValue;
+  const keyArray = Array.isArray(keys) ? keys : [keys];
+  for (const key of keyArray) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+      return obj[key];
+    }
+  }
+  return defaultValue;
+};
+
+// ================== DOWNLOAD PDF ==================
 router.post('/download-pdf', async (req, res) => {
   try {
     const { kundliData, panchangData, userDetails } = req.body;
     
-    console.log('📥 Generating PDF for:', userDetails?.name || 'User');
-    
-    
-    const getValue = (obj, keys, defaultValue = 'N/A') => {
-      if (!obj) return defaultValue;
-      const keyArray = Array.isArray(keys) ? keys : [keys];
-      for (const key of keyArray) {
-        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
-          return obj[key];
-        }
+    console.log(' Generating PDF for:', userDetails?.name || 'User');
+
+    // Create PDF document
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 50, bottom: 50, left: 50, right: 50 },
+      info: {
+        Title: 'Kundli Report',
+        Author: 'Nakshatra Ganak',
+        Subject: 'Astrological Report'
       }
-      return defaultValue;
-    };
+    });
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=kundli_report_${Date.now()}.pdf`);
+    res.setHeader('Cache-Control', 'no-cache');
     
-    // Get all values
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // ========== COLORS ==========
+    const primaryColor = '#2C3E50';
+    const secondaryColor = '#8E44AD';
+    const accentColor = '#E74C3C';
+    const successColor = '#27AE60';
+    const textColor = '#333333';
+    const lightText = '#7F8C8D';
+    const borderColor = '#BDC3C7';
+    const whiteColor = '#FFFFFF';
+
+    // ========== HEADER SECTION ==========
+    // Main Title
+    doc.fontSize(22)
+       .fillColor(primaryColor)
+       .font('Helvetica-Bold')
+       .text('NAKSHATRA GANAK', { align: 'center' });
+    
+    // Subtitle
+    doc.fontSize(12)
+       .fillColor(lightText)
+       .font('Helvetica')
+       .text('Complete Kundli Report', { align: 'center' });
+    
+    // Generated Date
+    doc.fontSize(9)
+       .text(`Generated: ${new Date().toLocaleString('en-IN')}`, { align: 'center' });
+    
+    doc.moveDown(1.5);
+    
+    // Divider Line
+    doc.strokeColor(borderColor)
+       .lineWidth(0.5)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    
+    doc.moveDown(1);
+
+    // ========== USER INFORMATION SECTION ==========
+    doc.rect(50, doc.y, 495, 70)
+       .fillAndStroke(secondaryColor, secondaryColor);
+    
+    // User Name
+    doc.fillColor(whiteColor)
+       .fontSize(14)
+       .font('Helvetica-Bold')
+       .text((userDetails?.name || 'User'), 60, doc.y + 18);
+    
+    // User Email
+    doc.fontSize(10)
+       .font('Helvetica')
+       .text(`Email: ${userDetails?.email || 'Not provided'}`, 60, doc.y + 38);
+    
+    // Birth Details
+    if (userDetails?.birthDetails) {
+      const bd = userDetails.birthDetails;
+      doc.text(`Date of Birth: ${bd.date}/${bd.month}/${bd.year}`, 60, doc.y + 55);
+      doc.text(`Time of Birth: ${bd.hour}:${String(bd.minute || 0).padStart(2, '0')}`, 260, doc.y + 38);
+      doc.text(`Location: ${bd.latitude}, ${bd.longitude}`, 260, doc.y + 55);
+    }
+    
+    doc.moveDown(3);
+
+    // ========== LAGNA (ASCENDANT) SECTION ==========
     const ascendant = getValue(kundliData, ['ascendant_sign', 'lagna', 'ascendant', 'sign'], 'N/A');
     const ascendantLord = getValue(kundliData, ['ascendant_lord', 'lagna_lord'], 'N/A');
-    const rashi = getValue(kundliData, ['sign', 'rashi', 'moon_sign'], 'N/A');
-    const nakshatra = getValue(kundliData, ['nakshatra', 'Naksahtra', 'nakshstra', 'star'], 'N/A');
-    const nakshatraLord = getValue(kundliData, ['nakshatra_lord', 'lord'], 'N/A');
-    const nakshatraPada = getValue(kundliData, ['pada', 'Charan', 'charan'], 'N/A');
+    
+    doc.rect(50, doc.y, 495, 70)
+       .fill(primaryColor);
+    
+    doc.fillColor(whiteColor)
+       .fontSize(14)
+       .font('Helvetica-Bold')
+       .text('LAGNA (ASCENDANT)', 60, doc.y + 20, { align: 'center', width: 475 });
+    
+    doc.fontSize(28)
+       .font('Helvetica-Bold')
+       .text(ascendant, { align: 'center', width: 475 });
+    
+    doc.fontSize(11)
+       .font('Helvetica')
+       .text(`Lord: ${ascendantLord}`, { align: 'center', width: 475 });
+    
+    doc.moveDown(2.5);
+
+    // ========== MANGLIK DOSHA SECTION ==========
     const manglik = getValue(kundliData, ['manglik', 'Manglik', 'is_manglik'], 'Non-Manglik');
     const isManglik = (manglik === 'Yes' || manglik === 'Manglik');
     
-    // Vedic Details
-    const yoga = getValue(kundliData, ['yoga', 'yog', 'Yog'], 'N/A');
-    const tithi = getValue(kundliData, ['tithi', 'Tithi'], 'N/A');
-    const karana = getValue(kundliData, ['karana', 'Karan'], 'N/A');
-    const gan = getValue(kundliData, ['gan', 'Gan'], 'N/A');
-    const nadi = getValue(kundliData, ['nadi', 'Nadi'], 'N/A');
-    const varna = getValue(kundliData, ['varna', 'Varna'], 'N/A');
-    const vashya = getValue(kundliData, ['vashya', 'Vashya'], 'N/A');
-    const yoni = getValue(kundliData, ['yoni', 'Yoni'], 'N/A');
-    const signLord = getValue(kundliData, ['sign_lord', 'SignLord'], 'N/A');
-    const tatva = getValue(kundliData, ['tatva', 'element'], 'N/A');
-    const paya = getValue(kundliData, ['paya'], 'N/A');
-    const nameAlphabet = getValue(kundliData, ['name_alphabet'], 'N/A');
+    doc.rect(50, doc.y, 495, 35)
+       .fill(isManglik ? accentColor : successColor);
     
-    // Dasha
-    const mahaDasha = getValue(kundliData, ['dasha.maha_dasha', 'current_dasha.maha_dasha'], 'N/A');
-    const antarDasha = getValue(kundliData, ['dasha.antar_dasha', 'current_dasha.antar_dasha'], 'N/A');
-    const dashaEndDate = getValue(kundliData, ['dasha.end_date', 'current_dasha.end_date'], 'N/A');
+    doc.fillColor(whiteColor)
+       .fontSize(12)
+       .font('Helvetica-Bold')
+       .text(`MANGLIK DOSHA: ${isManglik ? 'Manglik' : 'Non-Manglik'}`, { align: 'center', width: 495 });
     
-    // Panchang
-    const sunrise = getValue(panchangData, ['sunrise', 'Sunrise'], 'N/A');
-    const sunset = getValue(panchangData, ['sunset', 'Sunset'], 'N/A');
-    const moonrise = getValue(panchangData, ['moonrise', 'Moonrise'], 'N/A');
-    const moonset = getValue(panchangData, ['moonset', 'Moonset'], 'N/A');
-    const panchangTithi = getValue(panchangData, ['tithi', 'Tithi'], 'N/A');
-    const panchangNakshatra = getValue(panchangData, ['nakshatra', 'Naksahtra'], 'N/A');
-    const panchangYoga = getValue(panchangData, ['yog', 'yoga', 'Yog'], 'N/A');
-    const panchangKarana = getValue(panchangData, ['karan', 'Karan'], 'N/A');
-    const rahuKaal = getValue(panchangData, ['rahukaal', 'Rahukaal', 'rahukal'], 'N/A');
-    const yamaganda = getValue(panchangData, ['yamaganda', 'Yamaganda'], 'N/A');
-    const gulika = getValue(panchangData, ['gulika', 'Gulika'], 'N/A');
-    const paksha = getValue(panchangData, ['paksha', 'Paksha'], 'N/A');
-    const ritu = getValue(panchangData, ['ritu', 'Ritu'], 'N/A');
-    const ayana = getValue(panchangData, ['ayana', 'Ayana'], 'N/A');
+    doc.moveDown(2);
+
+    // ========== SECTION HELPER FUNCTION ==========
+    const addSection = (title) => {
+      doc.fillColor(primaryColor)
+         .fontSize(13)
+         .font('Helvetica-Bold')
+         .text(title);
+      doc.strokeColor(borderColor)
+         .lineWidth(0.5)
+         .moveTo(50, doc.y)
+         .lineTo(545, doc.y)
+         .stroke();
+      doc.moveDown(0.5);
+    };
+
+    // ========== RASHI & NAKSHATRA SECTION ==========
+    addSection('RASHI AND NAKSHATRA DETAILS');
     
-    // Build Planets Table
-    let planetsRows = '';
+    const rashi = getValue(kundliData, ['sign', 'rashi', 'moon_sign'], 'N/A');
+    const nakshatra = getValue(kundliData, ['nakshatra', 'Naksahtra'], 'N/A');
+    const nakshatraLord = getValue(kundliData, ['nakshatra_lord', 'lord'], 'N/A');
+    const nakshatraPada = getValue(kundliData, ['pada', 'Charan', 'charan'], 'N/A');
+    
+    doc.fillColor(textColor)
+       .fontSize(10)
+       .font('Helvetica');
+    
+    let rowY = doc.y;
+    doc.text(`Moon Sign (Rashi): ${rashi}`, 50, rowY);
+    doc.text(`Nakshatra: ${nakshatra}`, 300, rowY);
+    
+    rowY = doc.y + 20;
+    doc.text(`Nakshatra Lord: ${nakshatraLord}`, 50, rowY);
+    doc.text(`Pada / Charan: ${nakshatraPada}`, 300, rowY);
+    
+    doc.y = rowY + 25;
+
+    // ========== VEDIC DETAILS SECTION ==========
+    addSection('VEDIC ASTROLOGICAL DETAILS');
+    
+    const vedicItems = [
+      { label: 'Yoga', value: getValue(kundliData, ['yoga', 'yog'], 'N/A') },
+      { label: 'Tithi', value: getValue(kundliData, ['tithi'], 'N/A') },
+      { label: 'Karana', value: getValue(kundliData, ['karana'], 'N/A') },
+      { label: 'Gan', value: getValue(kundliData, ['gan'], 'N/A') },
+      { label: 'Nadi', value: getValue(kundliData, ['nadi'], 'N/A') },
+      { label: 'Varna', value: getValue(kundliData, ['varna'], 'N/A') },
+      { label: 'Vashya', value: getValue(kundliData, ['vashya'], 'N/A') },
+      { label: 'Yoni', value: getValue(kundliData, ['yoni'], 'N/A') },
+      { label: 'Sign Lord', value: getValue(kundliData, ['sign_lord'], 'N/A') },
+      { label: 'Tatva', value: getValue(kundliData, ['tatva'], 'N/A') },
+      { label: 'Paya', value: getValue(kundliData, ['paya'], 'N/A') },
+      { label: 'Name Alphabet', value: getValue(kundliData, ['name_alphabet'], 'N/A') }
+    ];
+    
+    let vedicY = doc.y;
+    for (let i = 0; i < vedicItems.length; i += 2) {
+      if (vedicY > 720) {
+        doc.addPage();
+        vedicY = 70;
+        addSection('VEDIC ASTROLOGICAL DETAILS (Continued)');
+      }
+      doc.text(`${vedicItems[i].label}: ${vedicItems[i].value}`, 50, vedicY);
+      if (vedicItems[i + 1]) {
+        doc.text(`${vedicItems[i + 1].label}: ${vedicItems[i + 1].value}`, 300, vedicY);
+      }
+      vedicY = doc.y + 18;
+    }
+    doc.y = vedicY + 5;
+
+    // ========== PLANETARY POSITIONS SECTION ==========
+    addSection('PLANETARY POSITIONS');
+    
     const planets = kundliData.planets || {};
-    const planetNames = { sun: 'Sun', moon: 'Moon', mars: 'Mars', mercury: 'Mercury', jupiter: 'Jupiter', venus: 'Venus', saturn: 'Saturn', rahu: 'Rahu', ketu: 'Ketu' };
+    const planetNames = { 
+      sun: 'Sun', moon: 'Moon', mars: 'Mars', mercury: 'Mercury',
+      jupiter: 'Jupiter', venus: 'Venus', saturn: 'Saturn', 
+      rahu: 'Rahu', ketu: 'Ketu' 
+    };
+    
+    // Table Header
+    let tableY = doc.y;
+    doc.fillColor(primaryColor)
+       .fontSize(9)
+       .font('Helvetica-Bold')
+       .text('Planet', 50, tableY)
+       .text('Sign', 160, tableY)
+       .text('Degree', 250, tableY)
+       .text('House', 330, tableY)
+       .text('Retrograde', 420, tableY);
+    
+    // Header underline
+    doc.strokeColor(borderColor)
+       .lineWidth(0.5)
+       .moveTo(50, tableY + 15)
+       .lineTo(545, tableY + 15)
+       .stroke();
+    
+    let planetRowY = tableY + 25;
+    doc.fillColor(textColor)
+       .fontSize(9)
+       .font('Helvetica');
     
     for (const [planet, info] of Object.entries(planets)) {
-      planetsRows += `
-        <tr>
-          <td style="padding: 8px; border: 1px solid #ddd;">${planetNames[planet] || planet}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${info.sign || 'N/A'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${info.degree || 'N/A'}°</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${info.house || 'N/A'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${info.retrograde ? 'Yes' : 'No'}</td>
-        </tr>
-      `;
+      if (planetRowY > 750) {
+        doc.addPage();
+        planetRowY = 70;
+        // Redraw header
+        doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold');
+        doc.text('Planet', 50, planetRowY).text('Sign', 160, planetRowY).text('Degree', 250, planetRowY).text('House', 330, planetRowY).text('Retrograde', 420, planetRowY);
+        doc.strokeColor(borderColor).lineWidth(0.5).moveTo(50, planetRowY + 15).lineTo(545, planetRowY + 15).stroke();
+        planetRowY += 25;
+        doc.fillColor(textColor).fontSize(9).font('Helvetica');
+      }
+      doc.text(planetNames[planet] || planet, 50, planetRowY)
+         .text(info.sign || 'N/A', 160, planetRowY)
+         .text(`${info.degree || 'N/A'}`, 250, planetRowY)
+         .text(info.house || 'N/A', 330, planetRowY)
+         .text(info.retrograde ? 'Yes' : 'No', 420, planetRowY);
+      planetRowY += 18;
     }
     
-    // Build Houses Table
-    let housesRows = '';
+    doc.y = planetRowY + 10;
+
+    // ========== HOUSES SECTION ==========
+    addSection('HOUSES (BHAVAS)');
+    
     const houses = kundliData.houses || [];
     const houseNames = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th'];
     
+    // Table Header
+    let houseTableY = doc.y;
+    doc.fillColor(primaryColor)
+       .fontSize(9)
+       .font('Helvetica-Bold')
+       .text('House', 50, houseTableY)
+       .text('Sign', 160, houseTableY)
+       .text('Lord', 270, houseTableY)
+       .text('Degree', 380, houseTableY);
+    
+    // Header underline
+    doc.strokeColor(borderColor)
+       .lineWidth(0.5)
+       .moveTo(50, houseTableY + 15)
+       .lineTo(545, houseTableY + 15)
+       .stroke();
+    
+    let houseRowY = houseTableY + 25;
+    doc.fillColor(textColor)
+       .fontSize(9)
+       .font('Helvetica');
+    
     for (let i = 0; i < Math.min(12, houses.length); i++) {
       const house = houses[i];
-      housesRows += `
-        <tr>
-          <td style="padding: 8px; border: 1px solid #ddd;">${houseNames[i]}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${house.sign || 'N/A'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${house.lord || 'N/A'}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${house.degree ? house.degree + '°' : 'N/A'}</td>
-        </tr>
-      `;
-    }
-    
-    // Complete HTML
-    const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Kundli Report - ${userDetails?.name || 'User'}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      padding: 40px;
-      background: white;
-      color: #333;
-      line-height: 1.4;
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 30px;
-      padding-bottom: 20px;
-      border-bottom: 3px solid #5B4B8A;
-    }
-    .header h1 { color: #5B4B8A; font-size: 28px; margin-bottom: 8px; }
-    .header p { color: #666; font-size: 12px; }
-    .user-card {
-      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
-      color: white;
-      padding: 20px;
-      border-radius: 12px;
-      margin-bottom: 25px;
-    }
-    .user-card h3 { margin-bottom: 10px; font-size: 18px; }
-    .user-card p { margin: 5px 0; opacity: 0.9; font-size: 12px; }
-    .section {
-      margin-bottom: 25px;
-      border: 1px solid #e0e0e0;
-      border-radius: 10px;
-      overflow: hidden;
-    }
-    .section-title {
-      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
-      color: white;
-      padding: 10px 18px;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    .section-content { padding: 18px; background: #fafafa; }
-    .lagna-card {
-      background: linear-gradient(135deg, #5B4B8A, #8B6BB8);
-      color: white;
-      text-align: center;
-      padding: 20px;
-      border-radius: 12px;
-      margin-bottom: 25px;
-    }
-    .lagna-value { font-size: 32px; font-weight: bold; margin: 8px 0; }
-    .manglik-yes { background: #E53935; color: white; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-    .manglik-no { background: #43A047; color: white; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
-    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-    .info-item { background: white; padding: 10px; border-radius: 8px; border-left: 3px solid #5B4B8A; }
-    .info-label { font-weight: bold; color: #5B4B8A; font-size: 11px; }
-    .info-value { font-size: 13px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; background: white; }
-    th { background: #5B4B8A; color: white; padding: 10px; text-align: left; font-size: 12px; }
-    td { padding: 8px; border-bottom: 1px solid #eee; font-size: 11px; }
-    .dasha-card { background: #FFF8E1; padding: 12px; border-radius: 8px; margin-top: 10px; }
-    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 10px; color: #999; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>NAKSHATRA GANAK</h1>
-    <p>Complete Kundli Report</p>
-    <p>Generated on: ${new Date().toLocaleString()}</p>
-  </div>
-  
-  <div class="user-card">
-    <h3>👤 ${userDetails?.name || 'User'}</h3>
-    <p>📧 ${userDetails?.email || 'Not provided'}</p>
-    ${userDetails?.birthDetails ? `<p>📅 Birth: ${userDetails.birthDetails.date}/${userDetails.birthDetails.month}/${userDetails.birthDetails.year} at ${userDetails.birthDetails.hour}:${userDetails.birthDetails.minute}</p>` : ''}
-  </div>
-  
-  <div class="lagna-card">
-    <h3>LAGNA (ASCENDANT)</h3>
-    <div class="lagna-value">${ascendant}</div>
-    <div>Lord: ${ascendantLord}</div>
-  </div>
-  
-  <div class="section">
-    <div class="section-title">⭐ RASHI & NAKSHATRA DETAILS</div>
-    <div class="section-content">
-      <div class="info-grid">
-        <div class="info-item"><div class="info-label">Moon Sign (Rashi)</div><div class="info-value">${rashi}</div></div>
-        <div class="info-item"><div class="info-label">Birth Star (Nakshatra)</div><div class="info-value">${nakshatra}</div></div>
-        <div class="info-item"><div class="info-label">Nakshatra Lord</div><div class="info-value">${nakshatraLord}</div></div>
-        <div class="info-item"><div class="info-label">Pada / Charan</div><div class="info-value">${nakshatraPada}</div></div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="${isManglik ? 'manglik-yes' : 'manglik-no'}">
-    <strong>MANGLIK DOSHA:</strong> ${isManglik ? 'Manglik' : 'Non-Manglik'}
-  </div>
-  
-  <div class="section">
-    <div class="section-title">📖 VEDIC ASTROLOGICAL DETAILS</div>
-    <div class="section-content">
-      <div class="info-grid">
-        <div class="info-item"><div class="info-label">Yoga</div><div class="info-value">${yoga}</div></div>
-        <div class="info-item"><div class="info-label">Tithi</div><div class="info-value">${tithi}</div></div>
-        <div class="info-item"><div class="info-label">Karana</div><div class="info-value">${karana}</div></div>
-        <div class="info-item"><div class="info-label">Gan</div><div class="info-value">${gan}</div></div>
-        <div class="info-item"><div class="info-label">Nadi</div><div class="info-value">${nadi}</div></div>
-        <div class="info-item"><div class="info-label">Varna</div><div class="info-value">${varna}</div></div>
-        <div class="info-item"><div class="info-label">Vashya</div><div class="info-value">${vashya}</div></div>
-        <div class="info-item"><div class="info-label">Yoni</div><div class="info-value">${yoni}</div></div>
-        <div class="info-item"><div class="info-label">Sign Lord</div><div class="info-value">${signLord}</div></div>
-        <div class="info-item"><div class="info-label">Tatva</div><div class="info-value">${tatva}</div></div>
-        <div class="info-item"><div class="info-label">Paya</div><div class="info-value">${paya}</div></div>
-        <div class="info-item"><div class="info-label">Name Alphabet</div><div class="info-value">${nameAlphabet}</div></div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="section">
-    <div class="section-title">🪐 PLANETARY POSITIONS</div>
-    <div class="section-content">
-      <table>
-        <thead><tr><th>Planet</th><th>Sign</th><th>Degree</th><th>House</th><th>Retrograde</th></tr></thead>
-        <tbody>${planetsRows || '<tr><td colspan="5" style="text-align:center;">No data available</td></tr>'}</tbody>
-      </table>
-    </div>
-  </div>
-  
-  <div class="section">
-    <div class="section-title">🏠 HOUSES (BHAVAS)</div>
-    <div class="section-content">
-      <table>
-        <thead><tr><th>House</th><th>Sign</th><th>Lord</th><th>Degree</th></tr></thead>
-        <tbody>${housesRows || '<tr><td colspan="4" style="text-align:center;">No data available</td></tr>'}</tbody>
-      </table>
-    </div>
-  </div>
-  
-  ${mahaDasha !== 'N/A' ? `
-  <div class="section">
-    <div class="section-title">⏳ CURRENT VIMSHOTTARI DASHA</div>
-    <div class="section-content">
-      <div class="dasha-card">
-        <strong>Maha Dasha:</strong> ${mahaDasha}<br>
-        <strong>Antar Dasha:</strong> ${antarDasha}<br>
-        <strong>Valid Until:</strong> ${dashaEndDate}
-      </div>
-    </div>
-  </div>
-  ` : ''}
-  
-  <div class="section">
-    <div class="section-title">📅 DAILY PANCHANG</div>
-    <div class="section-content">
-      <div class="info-grid">
-        <div class="info-item"><div class="info-label">Sunrise</div><div class="info-value">${sunrise}</div></div>
-        <div class="info-item"><div class="info-label">Sunset</div><div class="info-value">${sunset}</div></div>
-        <div class="info-item"><div class="info-label">Moonrise</div><div class="info-value">${moonrise}</div></div>
-        <div class="info-item"><div class="info-label">Moonset</div><div class="info-value">${moonset}</div></div>
-        <div class="info-item"><div class="info-label">Tithi</div><div class="info-value">${panchangTithi}</div></div>
-        <div class="info-item"><div class="info-label">Nakshatra</div><div class="info-value">${panchangNakshatra}</div></div>
-        <div class="info-item"><div class="info-label">Yoga</div><div class="info-value">${panchangYoga}</div></div>
-        <div class="info-item"><div class="info-label">Karana</div><div class="info-value">${panchangKarana}</div></div>
-        <div class="info-item"><div class="info-label">Rahu Kaal</div><div class="info-value">${rahuKaal}</div></div>
-        <div class="info-item"><div class="info-label">Yamaganda</div><div class="info-value">${yamaganda}</div></div>
-        <div class="info-item"><div class="info-label">Gulika</div><div class="info-value">${gulika}</div></div>
-        <div class="info-item"><div class="info-label">Paksha</div><div class="info-value">${paksha}</div></div>
-        <div class="info-item"><div class="info-label">Ritu</div><div class="info-value">${ritu}</div></div>
-        <div class="info-item"><div class="info-label">Ayana</div><div class="info-value">${ayana}</div></div>
-      </div>
-    </div>
-  </div>
-  
-  <div class="footer">
-    <p>This is a computer-generated kundli report based on Vedic astrology calculations.</p>
-    <p>© ${new Date().getFullYear()} Nakshatra Ganak - All Rights Reserved</p>
-  </div>
-</body>
-</html>`;
-    
-    const options = { 
-      format: 'A4',
-      orientation: 'portrait',
-      border: '10mm',
-      type: 'pdf',
-      timeout: 30000
-    };
-    
-    pdf.create(htmlContent, options).toBuffer((err, buffer) => {
-      if (err) {
-        console.error('PDF error:', err);
-        return res.status(500).json({ success: false, message: 'PDF generation failed: ' + err.message });
+      if (houseRowY > 750) {
+        doc.addPage();
+        houseRowY = 70;
+        // Redraw header
+        doc.fillColor(primaryColor).fontSize(9).font('Helvetica-Bold');
+        doc.text('House', 50, houseRowY).text('Sign', 160, houseRowY).text('Lord', 270, houseRowY).text('Degree', 380, houseRowY);
+        doc.strokeColor(borderColor).lineWidth(0.5).moveTo(50, houseRowY + 15).lineTo(545, houseRowY + 15).stroke();
+        houseRowY += 25;
+        doc.fillColor(textColor).fontSize(9).font('Helvetica');
       }
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename=kundli_report.pdf');
-      res.send(buffer);
-    });
+      doc.text(houseNames[i], 50, houseRowY)
+         .text(house.sign || 'N/A', 160, houseRowY)
+         .text(house.lord || 'N/A', 270, houseRowY)
+         .text(house.degree ? `${house.degree}` : 'N/A', 380, houseRowY);
+      houseRowY += 18;
+    }
     
-  } catch (err) {
-    console.error('Download error:', err);
-    res.status(500).json({ success: false, message: 'Failed to generate PDF: ' + err.message });
+    doc.y = houseRowY + 15;
+
+    // ========== DASHA SECTION ==========
+    const mahaDasha = getValue(kundliData, ['dasha.maha_dasha', 'current_dasha.maha_dasha'], 'N/A');
+    
+    if (mahaDasha !== 'N/A') {
+      addSection('CURRENT VIMSHOTTARI DASHA');
+      
+      const antarDasha = getValue(kundliData, ['dasha.antar_dasha', 'current_dasha.antar_dasha'], 'N/A');
+      const dashaEnd = getValue(kundliData, ['dasha.end_date', 'current_dasha.end_date'], 'N/A');
+      
+      doc.fillColor(textColor)
+         .fontSize(10)
+         .font('Helvetica');
+      
+      doc.text(`Maha Dasha: ${mahaDasha}`, 50, doc.y);
+      doc.text(`Antar Dasha: ${antarDasha}`, 50, doc.y + 18);
+      if (dashaEnd !== 'N/A') {
+        doc.text(`Valid Until: ${dashaEnd}`, 50, doc.y + 36);
+      }
+      
+      doc.moveDown(2.5);
+    }
+
+    // ========== PANCHANG SECTION ==========
+    addSection('DAILY PANCHANG');
+    
+    const panchangItems = [
+      { label: 'Sunrise', value: getValue(panchangData, ['sunrise', 'Sunrise'], 'N/A') },
+      { label: 'Sunset', value: getValue(panchangData, ['sunset', 'Sunset'], 'N/A') },
+      { label: 'Moonrise', value: getValue(panchangData, ['moonrise', 'Moonrise'], 'N/A') },
+      { label: 'Moonset', value: getValue(panchangData, ['moonset', 'Moonset'], 'N/A') },
+      { label: 'Tithi', value: getValue(panchangData, ['tithi'], 'N/A') },
+      { label: 'Nakshatra', value: getValue(panchangData, ['nakshatra'], 'N/A') },
+      { label: 'Yoga', value: getValue(panchangData, ['yog', 'yoga'], 'N/A') },
+      { label: 'Karana', value: getValue(panchangData, ['karan'], 'N/A') },
+      { label: 'Rahu Kaal', value: getValue(panchangData, ['rahukaal'], 'N/A') },
+      { label: 'Yamaganda', value: getValue(panchangData, ['yamaganda'], 'N/A') },
+      { label: 'Gulika', value: getValue(panchangData, ['gulika'], 'N/A') },
+      { label: 'Paksha', value: getValue(panchangData, ['paksha'], 'N/A') },
+      { label: 'Ritu', value: getValue(panchangData, ['ritu'], 'N/A') },
+      { label: 'Ayana', value: getValue(panchangData, ['ayana'], 'N/A') }
+    ];
+    
+    let panchangY = doc.y;
+    for (let i = 0; i < panchangItems.length; i += 2) {
+      if (panchangY > 750) {
+        doc.addPage();
+        panchangY = 70;
+        addSection('DAILY PANCHANG (Continued)');
+      }
+      doc.text(`${panchangItems[i].label}: ${panchangItems[i].value}`, 50, panchangY);
+      if (panchangItems[i + 1]) {
+        doc.text(`${panchangItems[i + 1].label}: ${panchangItems[i + 1].value}`, 300, panchangY);
+      }
+      panchangY = doc.y + 18;
+    }
+    
+    doc.y = panchangY;
+
+    // ========== FOOTER ==========
+    doc.moveDown(2);
+    
+    doc.strokeColor(borderColor)
+       .lineWidth(0.5)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    
+    doc.moveDown(0.5);
+    
+    doc.fillColor(lightText)
+       .fontSize(8)
+       .font('Helvetica')
+       .text('This is a computer-generated kundli report based on Vedic astrology calculations.', { align: 'center' })
+       .text(`All rights reserved. Nakshatra Ganak - ${new Date().getFullYear()}`, { align: 'center' });
+    
+    // Finalize PDF
+    doc.end();
+    
+    console.log(' PDF generated successfully');
+    
+  } catch (error) {
+    console.error('PDF Error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to generate PDF: ' + error.message 
+      });
+    }
   }
 });
-
 // ================== SAVE PURCHASED KUNDLI ==================
 router.post('/save-purchased-kundli', protect, async (req, res) => {
   try {
